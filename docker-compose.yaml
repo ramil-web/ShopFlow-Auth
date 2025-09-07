@@ -1,0 +1,42 @@
+version: "3.9"
+services:
+  auth:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DB_HOST: auth-db
+      DB_PORT: 5432
+      DB_USER: auth_user
+      DB_PASSWORD: auth_pass
+      DB_DATABASE: auth_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      SECRET_KEY: supersecret
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-db
+      - rabbitmq
+
+  auth-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: auth_pass
+      POSTGRES_DB: auth_db
+    ports:
+      - "5433:5432" # отдельный порт, чтобы не конфликтовать с другими БД
+    volumes:
+      - auth-db-data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+volumes:
+  auth-db-data:
