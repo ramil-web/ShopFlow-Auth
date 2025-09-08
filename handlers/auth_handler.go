@@ -134,6 +134,7 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 			"user_id": user.ID,
 			"login":   user.Login,
 			"exp":     time.Now().Add(720 * time.Hour).Unix(),
+			"email":   user.Email,
 		})
 
 		tokenString, err := token.SignedString([]byte(os.Getenv("SECRET_KEY")))
