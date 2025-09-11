@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package authpb;
+
+option go_package = "proto/authpb";
+
+// Сообщение запроса авторизации
+message AuthRequest {
+  uint32 user_id = 1;
+  string token = 2;
+}
+
+// Сообщение ответа авторизации
+message AuthResponse {
+  bool valid = 1;
+  string email = 2;
+}
+
+// Сервис gRPC для Auth
+service AuthService {
+  rpc VerifyToken(AuthRequest) returns (AuthResponse);
+}

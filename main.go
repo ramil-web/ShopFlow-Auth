@@ -1,21 +1,23 @@
 package main
 
 import (
+	"auth/proto/authpb"
+	"auth/routes"
+	"auth/server"
+	"auth/services"
 	"fmt"
 	"log"
+	"net"
 	"os"
 
-	"auth/models"
-	"auth/routes"
-	"auth/services"
-
-	_ "auth/docs" // swag annotations
+	_ "auth/docs"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	amqp "github.com/rabbitmq/amqp091-go"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	"google.golang.org/grpc"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -29,33 +31,26 @@ import (
 // @in header
 // @name Authorization
 func main() {
+	// загрузка env
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, using system environment variables")
 	}
 
-	// Postgres
+	// Настройка подключения к базе
+	dbUser := os.Getenv("DB_USER")
+	dbPass := os.Getenv("DB_PASSWORD")
 	dbHost := os.Getenv("DB_HOST")
 	dbPort := os.Getenv("DB_PORT")
-	dbUser := os.Getenv("DB_USER")
-	dbPassword := os.Getenv("DB_PASSWORD")
 	dbName := os.Getenv("DB_DATABASE")
-	dbSSL := os.Getenv("DB_SSLMODE")
-	if dbSSL == "" {
-		dbSSL = "disable"
-	}
 
 	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
-		dbHost, dbUser, dbPassword, dbName, dbPort, dbSSL,
+		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
+		dbHost, dbUser, dbPass, dbName, dbPort,
 	)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	if err := db.AutoMigrate(&models.User{}); err != nil {
-		log.Fatal(err)
+		log.Fatal("failed to connect to database:", err)
 	}
 
 	// RabbitMQ
@@ -72,11 +67,11 @@ func main() {
 
 	publisher := services.NewEventPublisher(conn)
 
-	// Gin
+	// Gin REST
 	r := gin.Default()
+	routes.SetupRoutes(r, db, publisher) // теперь db != nil
 
-	routes.SetupRoutes(r, db, publisher)
-
+	// Swagger
 	swaggerURL := ginSwagger.URL("http://localhost:8080/swagger/doc.json")
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler, swaggerURL, ginSwagger.PersistAuthorization(true)))
 
@@ -85,7 +80,24 @@ func main() {
 		port = "8080"
 	}
 
-	log.Println("Auth service running on port", port)
+	// Запуск gRPC сервера в отдельной горутине
+	go func() {
+		grpcLis, err := net.Listen("tcp", ":50051")
+		if err != nil {
+			log.Fatalf("failed to listen gRPC: %v", err)
+		}
+
+		grpcServer := grpc.NewServer()
+		authpb.RegisterAuthServiceServer(grpcServer, &server.AuthService{})
+
+		log.Println("gRPC Auth server running on :50051")
+		if err := grpcServer.Serve(grpcLis); err != nil {
+			log.Fatalf("failed to serve gRPC: %v", err)
+		}
+	}()
+
+	// Запуск REST
+	log.Println("Auth REST service running on port", port)
 	if err := r.Run(":" + port); err != nil {
 		log.Fatal(err)
 	}
